@@ -228,12 +228,12 @@ static void profile_create(lv_obj_t * parent)
     lv_img_set_src(avatar, &img_demo_widgets_avatar);
 
     lv_obj_t * name = lv_label_create(panel1);
-    lv_label_set_text(name, "Elena Smith");
+    lv_label_set_text(name, "Robert Smith");
     lv_obj_add_style(name, &style_title, 0);
 
     lv_obj_t * dsc = lv_label_create(panel1);
     lv_obj_add_style(dsc, &style_text_muted, 0);
-    lv_label_set_text(dsc, "This is a short description of me. Take a look at my profile!");
+    lv_label_set_text(dsc, "In Libraries Folder!");
     lv_label_set_long_mode(dsc, LV_LABEL_LONG_WRAP);
 
     lv_obj_t * email_icn = lv_label_create(panel1);

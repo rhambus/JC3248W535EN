@@ -4,11 +4,12 @@
 #include "display.h"
 #include "esp_bsp.h"
 #include "lv_port.h"
-#include <esp_log.h>   // Add this line to include the header file that declares ESP_LOGI
-#include <esp_flash.h> // Add this line to include the header file that declares esp_flash_t
+#include <esp_log.h>
+#include <esp_flash.h>
 #include <esp_chip_info.h>
 #include <esp_system.h>
 #include <esp_heap_caps.h>
+#include "app_clock.h"
 
 static const char *TAG = "DEMO_LVGL";
 
@@ -32,8 +33,7 @@ static const char *TAG = "DEMO_LVGL";
  * To use the built-in examples and demos of LVGL uncomment the includes below respectively.
  * You also need to copy `lvgl/examples` to `lvgl/src/examples`. Similarly for the demos `lvgl/demos` to `lvgl/src/demos`.
  */
-#include <demos/lv_demos.h>
-// #include <examples/lv_examples.h>
+ // #include <examples/lv_examples.h>
 
 void setup();
 
@@ -79,7 +79,6 @@ void setup()
   size_t freePsram = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
   ESP_LOGI(TAG, "Free PSRAM: %d bytes", freePsram);
   logSection("Initialize panel device");
-  // ESP_LOGI(TAG, "Initialize panel device");
   bsp_display_cfg_t cfg = {
       .lvgl_port_cfg = ESP_LVGL_PORT_INIT_CONFIG(),
       .buffer_size = EXAMPLE_LCD_QSPI_H_RES * EXAMPLE_LCD_QSPI_V_RES,
@@ -94,31 +93,21 @@ void setup()
 #endif
   };
 
-  bsp_display_start_with_config(&cfg);
+  lv_disp_t *disp = bsp_display_start_with_config(&cfg);
+  if (disp == NULL)
+  {
+    ESP_LOGE(TAG, "Failed to initialize display");
+    return;
+  }
   bsp_display_backlight_on();
 
-  logSection("Create UI");
-  /* Lock the mutex due to the LVGL APIs are not thread-safe */
-  bsp_display_lock(0);
-
-  /**
-   * Try an example. Don't forget to uncomment header.
-   * See all the examples online: https://docs.lvgl.io/master/examples.html
-   * source codes: https://github.com/lvgl/lvgl/tree/e7f88efa5853128bf871dde335c0ca8da9eb7731/examples
-   */
-  //  lv_example_btn_1();
-
-  /**
-   * Or try out a demo.
-   * Don't forget to uncomment header and enable the demos in `lv_conf.h`. E.g. `LV_USE_DEMOS_WIDGETS`
-   */
-  lv_demo_widgets();
-  //     lv_demo_benchmark();
-  // lv_demo_music();
-  // lv_demo_stress();
-
-  /* Release the mutex */
-  bsp_display_unlock();
+  logSection("Load Elecrow clock UI");
+  esp_err_t ui_err = app_clock_start(disp);
+  if (ui_err != ESP_OK)
+  {
+    ESP_LOGE(TAG, "app_clock_start failed: %s", esp_err_to_name(ui_err));
+    return;
+  }
 
   logSection("LVGL porting example end");
 }
