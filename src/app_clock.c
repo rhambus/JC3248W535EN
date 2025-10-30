@@ -12,6 +12,11 @@
 #include "esp_log.h"
 #include "esp_check.h"
 #include "esp_log.h"
+#include "esp_sntp.h"
+
+#include "esp_sntp.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
 #include "custom.h"
 #include "events_init.h"
@@ -121,7 +126,68 @@ esp_err_t app_clock_start(lv_disp_t *disp)
 }
 
 // --------------------------------------------------------------------------
-// Wi-Fi event handler: reports connection status and IP address
+// SNTP (time sync) helper
+// --------------------------------------------------------------------------
+#include "esp_sntp.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+
+// Forward declaration of the resync task
+static void daily_time_sync_task(void *pvParameter);
+
+static void initialize_sntp(void)
+{
+    ESP_LOGI(TAG, "Initializing SNTP (time sync)");
+    esp_sntp_stop();  // in case it's already running
+    esp_sntp_setoperatingmode(SNTP_OPMODE_POLL);
+    esp_sntp_setservername(0, "pool.ntp.org");
+    esp_sntp_init();
+
+    // Launch a background task that waits until noon and resyncs daily
+    xTaskCreate(&daily_time_sync_task, "daily_time_sync", 4096, NULL, 5, NULL);
+}
+
+// --------------------------------------------------------------------------
+// Daily time sync task
+// --------------------------------------------------------------------------
+static void daily_time_sync_task(void *pvParameter)
+{
+    for (;;) {
+        set_timezone_if_unset();  // ensure local time zone is applied
+
+        time_t now;
+        struct tm timeinfo;
+
+        // Get current time
+        time(&now);
+        localtime_r(&now, &timeinfo);
+
+        // Calculate seconds until next local noon
+        int seconds_until_noon =
+            ((12 - timeinfo.tm_hour + 24) % 24) * 3600 - (timeinfo.tm_min * 60 + timeinfo.tm_sec);
+
+        if (seconds_until_noon < 0) seconds_until_noon += 24 * 3600;  // safety
+
+        ESP_LOGI(TAG, "Next NTP resync scheduled in %d seconds", seconds_until_noon);
+
+        // Sleep until then
+        vTaskDelay(seconds_until_noon * 1000 / portTICK_PERIOD_MS);
+
+        // Perform resync
+        ESP_LOGI(TAG, "Performing daily NTP resync...");
+        esp_sntp_stop();
+        esp_sntp_init();
+
+
+        // Wait one day before next check
+        vTaskDelay(24 * 3600 * 1000 / portTICK_PERIOD_MS);
+    }
+}
+
+
+
+// --------------------------------------------------------------------------
+// Wi-Fi event handler: start SNTP after IP acquired
 // --------------------------------------------------------------------------
 static void wifi_event_handler(void* arg, esp_event_base_t event_base,
                                int32_t event_id, void* event_data)
@@ -135,9 +201,31 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
     } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
         ip_event_got_ip_t* event = (ip_event_got_ip_t*) event_data;
         ESP_LOGI(TAG, "Got IP Address: " IPSTR, IP2STR(&event->ip_info.ip));
+
+        // Start SNTP once we have a connection
+        initialize_sntp();
+
+        // Wait for system time to be set
+        time_t now = 0;
+        struct tm timeinfo = {0};
+        int retry = 0;
+        const int retry_count = 15;
+        while (timeinfo.tm_year < (2016 - 1900) && ++retry < retry_count) {
+            ESP_LOGI(TAG, "Waiting for system time to be set... (%d/%d)", retry, retry_count);
+            vTaskDelay(2000 / portTICK_PERIOD_MS);
+            time(&now);
+            localtime_r(&now, &timeinfo);
+        }
+
+        if (timeinfo.tm_year >= (2016 - 1900)) {
+            char strftime_buf[64];
+            strftime(strftime_buf, sizeof(strftime_buf), "%c", &timeinfo);
+            ESP_LOGI(TAG, "System time set: %s", strftime_buf);
+        } else {
+            ESP_LOGW(TAG, "System time not set after retries.");
+        }
     }
 }
-
 
 void app_clock_loop(void)
 {
